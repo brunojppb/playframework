@@ -3,7 +3,6 @@
  */
 import java.util.regex.Pattern
 
-import bintray.BintrayPlugin.autoImport._
 import com.jsuereth.sbtpgp.PgpKeys
 import com.typesafe.tools.mima.core.ProblemFilters
 import com.typesafe.tools.mima.core._
@@ -48,7 +47,7 @@ object BuildSettings {
   }
 
   val fileHeaderSettings = Seq(
-    excludeFilter in (Compile, headerSources) := HiddenFileFilter ||
+    (Compile / headerSources / excludeFilter) := HiddenFileFilter ||
       fileUriRegexFilter(".*/cookie/encoding/.*") || fileUriRegexFilter(".*/inject/SourceProvider.java$") ||
       fileUriRegexFilter(".*/libs/reflect/.*"),
     headerLicense := Some(HeaderLicense.Custom("Copyright (C) Lightbend Inc. <https://www.lightbend.com>")),
@@ -62,18 +61,9 @@ object BuildSettings {
 
   def evictionSettings: Seq[Setting[_]] = Seq(
     // This avoids a lot of dependency resolution warnings to be showed.
-    evictionWarningOptions in update := EvictionWarningOptions.default
+    (update / evictionWarningOptions) := EvictionWarningOptions.default
       .withWarnTransitiveEvictions(false)
       .withWarnDirectEvictions(false)
-  )
-
-  // We are not automatically promoting artifacts to Sonatype and
-  // Bintray so that we can have more control of the release process
-  // and do something if somethings fails (for example, if publishing
-  // a artifact times out).
-  def playPublishingPromotionSettings: Seq[Setting[_]] = Seq(
-    playBuildPromoteBintray := false,
-    playBuildPromoteSonatype := false
   )
 
   val DocsApplication    = config("docs").hide
@@ -95,23 +85,21 @@ object BuildSettings {
     evictionSettings,
     ivyConfigurations ++= Seq(DocsApplication, SourcesApplication),
     javacOptions ++= Seq("-encoding", "UTF-8", "-Xlint:unchecked", "-Xlint:deprecation"),
-    scalacOptions in (Compile, doc) := {
+    (Compile / doc / scalacOptions) := {
       // disable the new scaladoc feature for scala 2.12.0, might be removed in 2.12.0-1 (https://github.com/scala/scala-dev/issues/249)
       CrossVersion.partialVersion(scalaVersion.value) match {
         case Some((2, v)) if v >= 12 => Seq("-no-java-comments")
         case _                       => Seq()
       }
     },
-    fork in Test := true,
-    parallelExecution in Test := false,
-    testListeners in (Test, test) := Nil,
-    javaOptions in Test ++= Seq("-XX:MaxMetaspaceSize=384m", "-Xmx512m", "-Xms128m"),
+    (Test / fork) := true,
+    (Test / parallelExecution) := false,
+    (Test / test / testListeners) := Nil,
+    (Test / javaOptions) ++= Seq("-XX:MaxMetaspaceSize=384m", "-Xmx512m", "-Xms128m"),
     testOptions ++= Seq(
       Tests.Argument(TestFrameworks.Specs2, "showtimes"),
       Tests.Argument(TestFrameworks.JUnit, "-v")
     ),
-    bintrayPackage := "play-sbt-plugin",
-    playPublishingPromotionSettings,
     version ~= { v =>
       v +
         sys.props.get("akka.version").map("-akka-" + _).getOrElse("") +
@@ -166,7 +154,7 @@ object BuildSettings {
       val IvyRegex = """^.*[/\\]([\.\-_\w]+)[/\\]([\.\-_\w]+)[/\\](?:jars|bundles)[/\\]([\.\-_\w]+)\.jar$""".r
 
       (for {
-        jar <- (dependencyClasspath in Compile in doc).value.toSet ++ (dependencyClasspath in Test in doc).value
+        jar <- (Compile / doc / dependencyClasspath).value.toSet ++ (Test / doc / dependencyClasspath).value
         fullyFile = jar.data
         urlOption = fullyFile.getCanonicalPath match {
           case ScalaLibraryRegex(v) =>
@@ -209,6 +197,8 @@ object BuildSettings {
       (organization.value %% moduleName.value % version).cross(cross)
     }.toSet,
     mimaBinaryIssueFilters ++= Seq(
+      //Remove deprecated methods from Http
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.mvc.Http#RequestImpl.this"),
       // Remove deprecated methods from HttpRequestHandler
       ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.http.DefaultHttpRequestHandler.filterHandler"),
       ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.http.DefaultHttpRequestHandler.this"),
@@ -276,13 +266,66 @@ object BuildSettings {
       ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.cache.caffeine.CaffeineCacheApi.this"),
       ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.cache.caffeine.CaffeineCacheManager.this"),
       ProblemFilters.exclude[DirectMissingMethodProblem]("play.cache.caffeine.CaffeineParser.from"),
+      // Remove deprecated FakeKeyStore
+      ProblemFilters.exclude[MissingClassProblem]("play.core.server.ssl.FakeKeyStore$"),
+      ProblemFilters.exclude[MissingClassProblem]("play.core.server.ssl.FakeKeyStore"),
+      // Limit JSON parsing resources
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.data.FormUtils.fromJson$default$1"),
+      ProblemFilters.exclude[IncompatibleMethTypeProblem]("play.api.data.FormUtils.fromJson"), // is private
+      // Honour maxMemoryBuffer when binding Json to form
+      ProblemFilters.exclude[IncompatibleMethTypeProblem]("play.api.data.Form.bindFromRequest"),
+      ProblemFilters.exclude[ReversedMissingMethodProblem](
+        "play.api.mvc.PlayBodyParsers.play$api$mvc$PlayBodyParsers$_setter_$defaultFormBinding_="
+      ),
+      ProblemFilters.exclude[ReversedMissingMethodProblem]("play.api.mvc.PlayBodyParsers.defaultFormBinding"),
+      ProblemFilters.exclude[ReversedMissingMethodProblem]("play.api.mvc.PlayBodyParsers.formBinding$default$1"),
+      ProblemFilters.exclude[ReversedMissingMethodProblem]("play.api.mvc.PlayBodyParsers.formBinding"),
+      // fix types on Json parsing limits
+      ProblemFilters.exclude[IncompatibleMethTypeProblem]("play.api.data.Form.bind"),
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.data.Form.bindFromRequest"),
+      ProblemFilters.exclude[ReversedMissingMethodProblem](
+        "play.api.mvc.BaseControllerHelpers.play$api$mvc$BaseControllerHelpers$_setter_$defaultFormBinding_="
+      ),
+      ProblemFilters.exclude[ReversedMissingMethodProblem]("play.api.mvc.BaseControllerHelpers.defaultFormBinding"),
+      // Add UUID PathBindableExtractors
+      ProblemFilters.exclude[ReversedMissingMethodProblem](
+        "play.api.routing.sird.PathBindableExtractors.play$api$routing$sird$PathBindableExtractors$_setter_$uuid_="
+      ),
+      ProblemFilters.exclude[ReversedMissingMethodProblem]("play.api.routing.sird.PathBindableExtractors.uuid"),
+      // Upgrading JJWT
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.http.JWTConfigurationParser.apply"),
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.http.SecretConfiguration.SHORTEST_SECRET_LENGTH"),
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.http.SecretConfiguration.SHORT_SECRET_LENGTH"),
+      // Removing Jetty ALPN Agent
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.core.PlayVersion.jettyAlpnAgentVersion"),
+      // Fix compile error on JDK15: Use direct AlgorithmId.get()
+      ProblemFilters
+        .exclude[IncompatibleMethTypeProblem]("play.core.server.ssl.CertificateGenerator.generateCertificate"),
+      // Add SameSite to DiscardingCookie
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.mvc.DiscardingCookie.apply"),
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.mvc.DiscardingCookie.copy"),
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.mvc.DiscardingCookie.this"),
+      ProblemFilters.exclude[IncompatibleSignatureProblem]("play.api.mvc.DiscardingCookie.curried"),
+      ProblemFilters.exclude[IncompatibleSignatureProblem]("play.api.mvc.DiscardingCookie.tupled"),
+      ProblemFilters.exclude[IncompatibleSignatureProblem]("play.api.mvc.DiscardingCookie.unapply"),
+      ProblemFilters.exclude[MissingTypesProblem]("play.api.mvc.DiscardingCookie$"),
+      // Variable substitution in evolutions scripts
+      ProblemFilters
+        .exclude[ReversedMissingMethodProblem]("play.api.db.evolutions.EvolutionsDatasourceConfig.substitutionsSuffix"),
+      ProblemFilters
+        .exclude[ReversedMissingMethodProblem]("play.api.db.evolutions.EvolutionsDatasourceConfig.substitutionsPrefix"),
+      ProblemFilters.exclude[ReversedMissingMethodProblem](
+        "play.api.db.evolutions.EvolutionsDatasourceConfig.substitutionsMappings"
+      ),
+      ProblemFilters
+        .exclude[ReversedMissingMethodProblem]("play.api.db.evolutions.EvolutionsDatasourceConfig.substitutionsEscape"),
     ),
-    unmanagedSourceDirectories in Compile += {
+    (Compile / unmanagedSourceDirectories) += {
       val suffix = CrossVersion.partialVersion(scalaVersion.value) match {
         case Some((x, y)) => s"$x.$y"
         case None         => scalaBinaryVersion.value
       }
-      (sourceDirectory in Compile).value / s"scala-$suffix"
+      (Compile / sourceDirectory).value / s"scala-$suffix"
     },
     // Argument for setting size of permgen space or meta space for all forked processes
     Docs.apiDocsInclude := true
@@ -307,10 +350,6 @@ object BuildSettings {
       .enablePlugins(PlayLibrary, AutomateHeaderPlugin)
       .settings(
         playCommonSettings,
-        (javacOptions in compile) ~= (_.map {
-          case "1.8" => "1.6"
-          case other => other
-        }),
         mimaPreviousArtifacts := Set.empty,
       )
   }
@@ -343,8 +382,9 @@ object BuildSettings {
     scriptedLaunchOpts ++= Seq(
       s"-Dsbt.boot.directory=${file(sys.props("user.home")) / ".sbt" / "boot"}",
       "-Xmx512m",
-      "-XX:MaxMetaspaceSize=512m",
-      s"-Dscala.version=$scala212",
+      "-XX:MaxMetaspaceSize=300m",
+      "-XX:HeapDumpPath=/tmp/",
+      "-XX:+HeapDumpOnOutOfMemoryError",
     ),
     scripted := scripted.tag(Tags.Test).evaluated,
   )
@@ -353,7 +393,7 @@ object BuildSettings {
     disableNonLocalPublishing,
     // This setting will work for sbt 1, but not 0.13. For 0.13 it only affects
     // `compile` and `update` tasks.
-    skip in publish := true,
+    (publish / skip) := true,
     publishLocal := {},
   )
   def disableNonLocalPublishing = Def.settings(
@@ -383,7 +423,7 @@ object BuildSettings {
       .settings(
         playCommonSettings,
         playScriptedSettings,
-        fork in Test := false,
+        (Test / fork) := false,
         mimaPreviousArtifacts := Set.empty,
       )
   }

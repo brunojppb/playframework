@@ -11,8 +11,8 @@ object Generators {
       version: String,
       scalaVersion: String,
       sbtVersion: String,
-      jettyAlpnAgentVersion: String,
       akkaVersion: String,
+      akkaHttpVersion: String,
       dir: File
   ): Seq[File] = {
     val file = dir / "PlayVersion.scala"
@@ -24,7 +24,7 @@ object Generators {
           |  val scalaVersion = "$scalaVersion"
           |  val sbtVersion = "$sbtVersion"
           |  val akkaVersion = "$akkaVersion"
-          |  private[play] val jettyAlpnAgentVersion = "$jettyAlpnAgentVersion"
+          |  val akkaHttpVersion = "$akkaHttpVersion"
           |}
           |""".stripMargin
 
@@ -63,9 +63,9 @@ object Commands {
 
     projectExtract.appendWithoutSession(
       filtered ++ Seq(
-        publishArtifact in GlobalScope in packageDoc := toggle,
-        publishArtifact in GlobalScope in packageSrc := toggle,
-        publishArtifact in GlobalScope := true
+        GlobalScope / packageDoc / publishArtifact := toggle,
+        GlobalScope / packageSrc / publishArtifact := toggle,
+        GlobalScope / publishArtifact := true
       ),
       state.put(quickPublishToggle, toggle)
     )
